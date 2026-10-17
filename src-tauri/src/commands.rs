@@ -2,6 +2,7 @@
 
 use crate::store::{DeletedPrompt, Prompt, Settings, Store, WarningCode};
 use crate::system::paste::PasteKind as UseKind;
+use crate::system::window::{self, WindowState};
 #[cfg(windows)]
 use crate::system::{foreground::ForegroundTracker, paste::paste_to_target};
 use serde::Serialize;
@@ -9,7 +10,7 @@ use std::{
     path::PathBuf,
     sync::{Mutex, MutexGuard},
 };
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 /// 应用共享状态；所有命令通过同一把锁串行修改数据文件。
@@ -33,7 +34,7 @@ impl AppState {
     }
 }
 
-/// 启动快照；targetTitle 在 T1 恒为 null，列表顺序与 Store 一致。
+/// 启动快照；包含当前可用目标标题及数据、快捷键警告，列表顺序与 Store 一致。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Snapshot {
@@ -64,13 +65,17 @@ pub(crate) fn load_store(data_directory: Result<PathBuf, String>) -> Store {
     }
 }
 
-/// 将 store 的当前数据组装成快照；不保存、不排序，T1 不查询前台窗口。
-fn snapshot_from_store(store: &Store) -> Snapshot {
+/// 合并数据、已验证的当前目标标题和快捷键状态；不保存、不排序，不丢弃数据层警告。
+fn snapshot_from_store(store: &Store, target_title: Option<String>, hotkey_busy: bool) -> Snapshot {
+    let mut warnings = store.warnings().to_vec();
+    if hotkey_busy {
+        warnings.push(WarningCode::HotkeyBusy);
+    }
     Snapshot {
         prompts: store.prompts().to_vec(),
         settings: *store.settings(),
-        target_title: None,
-        warnings: store.warnings().to_vec(),
+        target_title,
+        warnings,
     }
 }
 
@@ -91,11 +96,19 @@ fn copy_prompt(
     })
 }
 
-/// 读取 state 的当前快照；无前端参数，锁错误返回 `io:`。
+/// 读取 state、快捷键注册状态和当前有效目标，返回快照；无前端参数，锁错误返回 io:。
 #[tauri::command(rename_all = "camelCase")]
-pub(crate) fn get_snapshot(state: State<'_, AppState>) -> Result<Snapshot, String> {
+pub(crate) fn get_snapshot(app: AppHandle, state: State<'_, AppState>) -> Result<Snapshot, String> {
+    #[cfg(windows)]
+    let target_title = app
+        .state::<ForegroundTracker>()
+        .current_target()?
+        .map(|target| target.title);
+    #[cfg(not(windows))]
+    let target_title = None;
+    let hotkey_busy = app.state::<WindowState>().hotkey_busy;
     let store = state.lock()?;
-    Ok(snapshot_from_store(&store))
+    Ok(snapshot_from_store(&store, target_title, hotkey_busy))
 }
 
 /// 将 text 去空白后追加到 state 并保存；返回新条目，错误为 empty_text 或 io:。
@@ -182,7 +195,7 @@ pub(crate) fn set_settings(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Settings, String> {
-    let window = main_window(&app)?;
+    let window = window::main_window(&app)?;
     let mut store = state.lock()?;
     let saved = store.set_settings(settings)?;
     window
@@ -194,21 +207,7 @@ pub(crate) fn set_settings(
 /// 切换 app 主窗口的最小化状态；无前端参数，成功无回执，窗口错误返回 io:。
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) fn toggle_minimize(app: AppHandle) -> Result<(), String> {
-    let window = main_window(&app)?;
-    if window
-        .is_minimized()
-        .map_err(|error| format!("io:{error}"))?
-    {
-        window.unminimize().map_err(|error| format!("io:{error}"))
-    } else {
-        window.minimize().map_err(|error| format!("io:{error}"))
-    }
-}
-
-/// 获取 app 中标签为 main 的主窗口；缺失时返回 io:，不操作命令来源窗口。
-fn main_window(app: &AppHandle) -> Result<WebviewWindow, String> {
-    app.get_webview_window("main")
-        .ok_or_else(|| "io:main window unavailable".to_owned())
+    window::toggle_minimize(&app)
 }
 
 #[cfg(test)]
@@ -252,7 +251,7 @@ mod tests {
         seed(&path);
         let original = fs::read(&path).unwrap();
         let store = load_store(Ok(dir.path().to_path_buf()));
-        let snapshot = snapshot_from_store(&store);
+        let snapshot = snapshot_from_store(&store, None, false);
         assert_eq!(
             serde_json::to_value(snapshot).unwrap(),
             json!({
@@ -266,6 +265,28 @@ mod tests {
             })
         );
         assert_eq!(fs::read(path).unwrap(), original, "快照读取不能写文件");
+    }
+
+    #[test]
+    fn snapshot_includes_target_title_without_hotkey_warning() {
+        let dir = test_dir();
+        let store = load_store(Ok(dir.path().to_path_buf()));
+        let snapshot = snapshot_from_store(&store, Some("AI 对话框".to_owned()), false);
+        let value = serde_json::to_value(snapshot).unwrap();
+        assert_eq!(value["targetTitle"], json!("AI 对话框"));
+        assert_eq!(value["warnings"], json!([]));
+    }
+
+    #[test]
+    fn snapshot_combines_hotkey_failure_with_data_warning() {
+        let store = Store::unavailable("io:read denied".to_owned());
+        let snapshot = snapshot_from_store(&store, None, true);
+        let value = serde_json::to_value(snapshot).unwrap();
+        assert_eq!(value["targetTitle"], json!(null));
+        assert_eq!(
+            value["warnings"],
+            json!(["data_file_unavailable", "hotkey_busy"])
+        );
     }
 
     #[test]
@@ -347,7 +368,7 @@ mod tests {
     fn data_directory_failure_starts_empty_with_warning_and_rejects_writes() {
         let mut store = load_store(Err("io:app_data_dir unavailable".to_owned()));
         assert_eq!(
-            serde_json::to_value(snapshot_from_store(&store)).unwrap(),
+            serde_json::to_value(snapshot_from_store(&store, None, false)).unwrap(),
             json!({
                 "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
                 "targetTitle": null, "warnings": ["data_file_unavailable"]
@@ -369,7 +390,7 @@ mod tests {
         fs::write(&protected, b"original content").unwrap();
         let mut store = load_store(Ok(dir.path().to_path_buf()));
         assert_eq!(
-            serde_json::to_value(snapshot_from_store(&store)).unwrap(),
+            serde_json::to_value(snapshot_from_store(&store, None, false)).unwrap(),
             json!({
                 "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
                 "targetTitle": null, "warnings": ["data_file_unavailable"]
@@ -403,7 +424,7 @@ mod tests {
 
         let mut store = load_store(Ok(dir.path().to_path_buf()));
         assert_eq!(
-            serde_json::to_value(snapshot_from_store(&store)).unwrap(),
+            serde_json::to_value(snapshot_from_store(&store, None, false)).unwrap(),
             json!({
                 "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
                 "targetTitle": null, "warnings": ["data_file_unavailable"]
@@ -430,7 +451,7 @@ mod tests {
         fs::write(&path, original).unwrap();
         let mut store = load_store(Ok(dir.path().to_path_buf()));
         assert_eq!(
-            serde_json::to_value(snapshot_from_store(&store)).unwrap(),
+            serde_json::to_value(snapshot_from_store(&store, None, false)).unwrap(),
             json!({
                 "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
                 "targetTitle": null, "warnings": ["data_file_unavailable"]

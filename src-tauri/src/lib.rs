@@ -1,9 +1,10 @@
-//! 装配 Tauri、数据状态、前台目标跟踪和命令；粘贴与窗口行为由系统模块接入。
+//! 装配数据、前台跟踪、窗口行为和命令；窗口插件状态不覆盖数据文件的置顶设置。
 
 mod commands;
 pub mod store;
 pub mod system;
 
+use system::window;
 use tauri::Manager;
 #[cfg(windows)]
 use {system::foreground::ForegroundTracker, tauri::Emitter};
@@ -11,19 +12,26 @@ use {system::foreground::ForegroundTracker, tauri::Emitter};
 /// 启动主窗口和事件循环；数据加载错误降级为空列表，其他 Tauri 启动错误报告后退出。
 pub fn run() {
     let builder = tauri::Builder::default()
-        // 单实例插件要求先注册；重复启动时的窗口恢复逻辑由 T2 接入。
-        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}));
+        // 先判断单实例，第二次启动在创建配置窗口前退出，只唤起已有实例。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Err(error) = window::restore_and_show(app) {
+                eprintln!("重复启动时恢复主窗口失败：{error}");
+            }
+        }));
     #[cfg(windows)]
     let builder = builder.plugin(foreground_plugin());
 
     let result = builder
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        // T1 只注册插件，避免默认保存和恢复提前引入 T2 的窗口状态行为。
+        // 只记住位置与大小；可见性不持久化，置顶以 prompts.json 中的设置为准。
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_state_flags(tauri_plugin_window_state::StateFlags::empty())
-                .skip_initial_state("main")
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::SIZE,
+                )
+                .with_filter(|label| label == "main")
                 .build(),
         )
         .setup(|app| {
@@ -31,7 +39,14 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|error| format!("io:{error}"));
-            app.manage(commands::AppState::new(commands::load_store(directory)));
+            let store = commands::load_store(directory);
+            let always_on_top = store.settings().always_on_top;
+            app.manage(commands::AppState::new(store));
+            window::main_window(app.handle())?
+                .set_always_on_top(always_on_top)
+                .map_err(|error| format!("io:restore alwaysOnTop: {error}"))?;
+            // 不用 Builder::with_shortcuts：该入口会把注册失败当启动错误，无法降级显示警告。
+            app.manage(window::register_toggle_shortcut(app.handle()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

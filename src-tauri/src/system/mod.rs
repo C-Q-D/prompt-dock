@@ -3,3 +3,4 @@
 #[cfg(windows)]
 pub mod foreground;
 pub mod paste;
+pub(crate) mod window;
