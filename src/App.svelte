@@ -1,6 +1,7 @@
 <!-- 正式主窗口；只渲染会话状态并转发操作，系统调用集中在 api.ts。 -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
+  import type { Prompt } from "./lib/api";
   import { createDockState, statusText } from "./lib/state";
   import Button from "./lib/components/Button.svelte";
   import Icon from "./lib/components/Icon.svelte";
@@ -8,11 +9,15 @@
   import Switch from "./lib/components/Switch.svelte";
   import Banner from "./lib/components/Banner.svelte";
   import Toast from "./lib/components/Toast.svelte";
+  import PromptDialog from "./lib/components/PromptDialog.svelte";
   import "./lib/window.css";
 
   const dock = createDockState();
   let list: HTMLDivElement;
   let focusedId = $state<string | null>(null);
+  let addButton = $state<HTMLButtonElement>();
+  let dialogTrigger: HTMLButtonElement | null = null;
+  let dialogRowIndex = 0;
   const status = $derived(statusText($dock.settings, $dock.targetTitle));
 
   onMount(() => {
@@ -29,9 +34,40 @@
     focusedId = $dock.prompts[nextIndex].id;
     list.querySelectorAll<HTMLButtonElement>(".row-main")[nextIndex]?.focus();
   }
+
+  /** 捕获真正触发按钮；编辑项被删除时保留索引以便聚焦相邻行。 */
+  function openDialog(prompt: Prompt | null, trigger: HTMLButtonElement) {
+    dialogTrigger = trigger;
+    dialogRowIndex = prompt ? $dock.prompts.findIndex((item) => item.id === prompt.id) : 0;
+    dock.openDialog(prompt);
+  }
+
+  /** 等背景解除 inert 后返回原按钮；原编辑按钮已删除时选相邻行或新增按钮。 */
+  async function restoreDialogFocus() {
+    await tick();
+    if ($dock.dialog) return;
+    if (dialogTrigger?.isConnected) {
+      dialogTrigger.focus();
+    } else {
+      const rows = list.querySelectorAll<HTMLButtonElement>(".row-main");
+      (rows[Math.min(dialogRowIndex, rows.length - 1)] ?? addButton)?.focus();
+    }
+    dialogTrigger = null;
+  }
+
+  /** 撤销按钮会立即消失，先将焦点放在新增按钮，恢复后再聚焦还原的条目。 */
+  async function undoDeletion() {
+    const id = $dock.toast?.undo?.prompt.id;
+    addButton?.focus();
+    await dock.restoreDeleted();
+    await tick();
+    const index = $dock.prompts.findIndex((prompt) => prompt.id === id);
+    if (index >= 0) list.querySelectorAll<HTMLButtonElement>(".row-main")[index]?.focus();
+  }
 </script>
 
 <main class="win" aria-label="常用提示词" onmouseleave={() => void dock.sortPrompts(true)}>
+  <div class="window-content" inert={!!$dock.dialog}>
   <header class="tbar" data-tauri-drag-region>
     <span class="tbar-t" data-tauri-drag-region>常用提示词</span>
     <IconButton icon="pin" label={$dock.settings.alwaysOnTop ? "取消置顶" : "置顶"}
@@ -41,7 +77,7 @@
     <IconButton icon="close" label="关闭" onclick={() => void dock.close()} />
   </header>
   <div class="toolbar">
-    <Button variant={$dock.prompts.length ? "primary" : "secondary"} onGround disabled={!$dock.ready} onclick={() => dock.openDialog(null)}>
+    <Button bind:element={addButton} variant={$dock.prompts.length ? "primary" : "secondary"} onGround disabled={!$dock.ready} onclick={(event) => openDialog(null, event.currentTarget)}>
       <Icon name="plus" /><span>新增</span>
     </Button>
     <Button variant="weak" class="sort" aria-label="按次数排序" title="按次数排序" disabled={!$dock.prompts.length} onclick={() => void dock.sortPrompts()}>
@@ -61,14 +97,14 @@
           onfocus={() => focusedId = prompt.id} onkeydown={(event) => navigateRows(event, prompt.id)}
           onclick={() => { focusedId = prompt.id; void dock.usePrompt(prompt.id); }}
         ><span class="txt">{prompt.text}</span><span class="cnt">{prompt.count} 次</span></button>
-        <IconButton icon="edit" label="编辑" class="pen" tabindex={focusedId === prompt.id ? 0 : -1} onclick={() => dock.openDialog(prompt)} />
+        <IconButton icon="edit" label="编辑" class="pen" tabindex={focusedId === prompt.id ? 0 : -1} onclick={(event) => openDialog(prompt, event.currentTarget)} />
       </div>
     {:else}
       {#if $dock.ready}
         <div class="empty">
           <div class="empty-t">还没有提示词</div>
           <div class="empty-b">把常说的话存进来，点一下就能粘贴到对话框里。</div>
-          <Button large onclick={() => dock.openDialog(null)}><Icon name="plus" /><span>新增提示词</span></Button>
+          <Button large onclick={(event) => openDialog(null, event.currentTarget)}><Icon name="plus" /><span>新增提示词</span></Button>
         </div>
       {/if}
     {/each}
@@ -76,5 +112,11 @@
   <footer class="status" role="status" aria-live="polite">
     <span class="status-l">{status.lead}</span><span class="status-v">{status.target}</span>
   </footer>
-  <Toast message={$dock.toast?.message ?? null} onpause={(reason) => dock.pauseToast(true, reason)} onresume={(reason) => dock.pauseToast(false, reason)} />
+  <Toast message={$dock.toast?.message ?? null} onundo={$dock.toast?.undo ? () => void undoDeletion() : undefined}
+    onpause={(reason) => dock.pauseToast(true, reason)} onresume={(reason) => dock.pauseToast(false, reason)} />
+  </div>
+  {#if $dock.dialog}
+    <PromptDialog dialog={$dock.dialog} oninput={dock.setDialogText} oncancel={dock.cancelDialog}
+      onsave={() => void dock.saveDialog()} ondelete={() => void dock.deletePrompt()} onclosed={() => void restoreDialogFocus()} />
+  {/if}
 </main>

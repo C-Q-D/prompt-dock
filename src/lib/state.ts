@@ -1,15 +1,15 @@
 /** 主窗口唯一状态源；纯状态转换不依赖 DOM，IPC、监听和计时器由会话持有。 */
 import { get, writable } from "svelte/store";
 import * as api from "./api";
-import type { PreviewState, Prompt, Settings, Snapshot, UseResult, WarningCode } from "./api";
+import type { DeletedPrompt, PreviewState, Prompt, Settings, Snapshot, UseResult, WarningCode } from "./api";
 
 /** 可单独关闭的横幅；多个启动警告按快照顺序显示。 */
 export type Banner = { title: string; body: string };
 /** 剩余时间单位为毫秒；startedAt=null 表示暂停。 */
-export type Toast = { message: string; remainingMs: number; startedAt: number | null };
-/** 弹窗入口状态；T3.2 记录意图，弹窗渲染由 T3.3 接入。 */
-export type Dialog = { kind: "add" | "edit"; prompt: Prompt | null };
-/** 列表顺序只由快照或显式排序结果替换，计次回执仅替换对应条目。 */
+export type Toast = { message: string; remainingMs: number; startedAt: number | null; undo?: DeletedPrompt };
+/** 弹窗草稿及请求状态；prompt 是编辑时的原条目，text 是用户尚未保存的内容。 */
+export type Dialog = { kind: "add" | "edit"; prompt: Prompt | null; text: string; error: string | null; busy: boolean };
+/** 快照、排序与撤销回执可替换完整列表；计次和编辑保持位置，新增追加末尾。 */
 export type DockState = {
   prompts: Prompt[];
   settings: Settings;
@@ -44,9 +44,34 @@ export function stateFromSnapshot(snapshot: Snapshot, preview: PreviewState | nu
   return {
     prompts: snapshot.prompts, settings: snapshot.settings, targetTitle: snapshot.targetTitle,
     banner: [...snapshot.warnings.map((code) => warningMessages[code]), ...(preview?.banner ? [preview.banner] : [])],
-    toast: preview?.toast ? { message: preview.toast, remainingMs: TOAST_DURATION_MS, startedAt: nowMs } : null,
-    dialog: preview?.dialog ?? null, dirty: preview?.dirty ?? false, ready: true,
+    toast: preview?.toast ? {
+      message: preview.toast, remainingMs: TOAST_DURATION_MS, startedAt: nowMs,
+      ...(preview.deleted ? { undo: preview.deleted } : {}),
+    } : null,
+    dialog: preview?.dialog ? createDialog(preview.dialog.prompt) : null,
+    dirty: preview?.dirty ?? false, ready: true,
   };
+}
+
+/** 创建独立草稿；编辑不直接改列表，取消时可直接丢弃。 */
+function createDialog(prompt: Prompt | null): Dialog {
+  return { kind: prompt ? "edit" : "add", prompt, text: prompt?.text ?? "", error: null, busy: false };
+}
+
+/** 返回可显示的校验提示；后端 empty_text 优先，空白正文同样不能保存。 */
+export function dialogError(dialog: Dialog): string | null {
+  return dialog.error ?? (dialog.text.trim() ? null : "内容不能为空");
+}
+
+/** 删除提示按 Unicode 码点截取十二字，避免截断代理对；恰好十二字不加省略号。 */
+export function deletionMessage(text: string): string {
+  const characters = Array.from(text);
+  return `已删除“${characters.slice(0, 12).join("")}${characters.length > 12 ? "…" : ""}”`;
+}
+
+/** 遮罩只取消完全空的草稿；空白字符仍属于用户已输入的内容。 */
+export function canDismissDialog(dialog: Dialog, source: "explicit" | "backdrop"): boolean {
+  return source === "explicit" || dialog.text.length === 0;
 }
 
 /** 根据设置和目标生成状态栏文案；无目标时给出下一步操作。 */
@@ -103,6 +128,7 @@ export function createDockState(backend: DockApi = api) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let unlisten: (() => void) | undefined;
   let targetRevision = 0;
+  let dialogVersion = 0;
   const pauseReasons = new Set<"pointer" | "focus">();
 
   /** 清理当前提示条定时器，不改变其文字或剩余时间。 */
@@ -215,15 +241,111 @@ export function createDockState(backend: DockApi = api) {
     scheduleToast();
   }
 
+  /** 更新草稿时清除上次服务端校验错误；请求在途的草稿只读。 */
+  function setDialogText(text: string) {
+    store.update((state) => state.dialog && !state.dialog.busy
+      ? { ...state, dialog: { ...state.dialog, text, error: null } } : state);
+  }
+
+  /** 取消只丢弃草稿；遮罩有内容时保留，显式关闭始终允许。 */
+  function cancelDialog(source: "explicit" | "backdrop" = "explicit") {
+    const dialog = get(store).dialog;
+    if (!dialog || !canDismissDialog(dialog, source)) return;
+    dialogVersion += 1;
+    store.update((state) => ({ ...state, dialog: null }));
+  }
+
+  /**
+   * 保存当前草稿；空内容不发命令，重复提交被 busy 拦截。
+   * 在途取消不撤销已发命令；成功仍更新列表，但不关闭后来打开的新弹窗。
+   */
+  function saveDialog(): Promise<void> {
+    const dialog = get(store).dialog;
+    if (!dialog || dialog.busy) return Promise.resolve();
+    if (!dialog.text.trim()) {
+      store.update((state) => ({ ...state, dialog: { ...dialog, error: "内容不能为空" } }));
+      return Promise.resolve();
+    }
+    const version = dialogVersion;
+    store.update((state) => ({ ...state, dialog: { ...dialog, busy: true } }));
+    return enqueue(async () => {
+      try {
+        const prompt = dialog.prompt
+          ? await backend.invoke("update_prompt", { id: dialog.prompt.id, text: dialog.text })
+          : await backend.invoke("add_prompt", { text: dialog.text });
+        if (disposed) return;
+        store.update((state) => ({
+          ...state,
+          prompts: dialog.prompt ? state.prompts.map((item) => item.id === prompt.id ? prompt : item) : [...state.prompts, prompt],
+          dialog: version === dialogVersion ? null : state.dialog,
+        }));
+      } catch (error) {
+        if (disposed) return;
+        const empty = String(error) === "empty_text";
+        store.update((state) => ({ ...state, dialog: version === dialogVersion && state.dialog
+          ? { ...state.dialog, busy: false, error: empty ? "内容不能为空" : null } : state.dialog }));
+        if (!empty) {
+          if (String(error) === "not_found" && version === dialogVersion) cancelDialog();
+          await handleError(error);
+        }
+      }
+    });
+  }
+
+  /** 删除编辑项，成功后关闭弹窗并持有唯一撤销回执；失败保留草稿并显示错误。 */
+  function deletePrompt(): Promise<void> {
+    const dialog = get(store).dialog;
+    if (!dialog?.prompt || dialog.busy) return Promise.resolve();
+    const id = dialog.prompt.id;
+    const version = dialogVersion;
+    store.update((state) => ({ ...state, dialog: { ...dialog, busy: true } }));
+    return enqueue(async () => {
+      try {
+        const deleted = await backend.invoke("delete_prompt", { id });
+        if (disposed) return;
+        clearTimer();
+        pauseReasons.clear();
+        store.update((state) => ({
+          ...state, prompts: state.prompts.filter((prompt) => prompt.id !== deleted.prompt.id),
+          dialog: version === dialogVersion ? null : state.dialog,
+          toast: { message: deletionMessage(deleted.prompt.text), remainingMs: TOAST_DURATION_MS, startedAt: Date.now(), undo: deleted },
+        }));
+        scheduleToast();
+      } catch (error) {
+        if (disposed) return;
+        store.update((state) => ({ ...state, dialog: version === dialogVersion && state.dialog
+          ? { ...state.dialog, busy: false } : state.dialog }));
+        if (String(error) === "not_found" && version === dialogVersion) cancelDialog();
+        await handleError(error);
+      }
+    });
+  }
+
+  /** 在有效期内领取一次撤销回执；先移除入口，再排队恢复，避免重复插入。 */
+  function restoreDeleted(): Promise<void> {
+    const toast = get(store).toast;
+    if (!toast?.undo || remainingToastMs(toast, Date.now()) <= 0) return Promise.resolve();
+    const deleted = toast.undo;
+    clearTimer();
+    pauseReasons.clear();
+    store.update((state) => ({ ...state, toast: null }));
+    return enqueue(async () => {
+      const prompts = await backend.invoke("restore_prompt", deleted);
+      if (!disposed) store.update((state) => ({ ...state, prompts }));
+    });
+  }
+
   return {
     subscribe: store.subscribe, initialize, usePrompt, sortPrompts, setSettings, pauseToast,
+    setDialogText, cancelDialog, saveDialog, deletePrompt, restoreDeleted,
     /** 关闭指定横幅，不影响其他启动警告。 */
     dismissBanner(index: number) {
       store.update((state) => ({ ...state, banner: state.banner.filter((_, i) => i !== index) }));
     },
-    /** 记录弹窗请求；prompt=null 表示新增。 */
+    /** 打开独立草稿；递增版本，隔离被取消请求的晚到回执。 */
     openDialog(prompt: Prompt | null) {
-      store.update((state) => ({ ...state, dialog: { kind: prompt ? "edit" : "add", prompt } }));
+      dialogVersion += 1;
+      store.update((state) => ({ ...state, dialog: createDialog(prompt) }));
     },
     /** 缩小失败进入统一反馈，不自动重试系统操作。 */
     minimize: () => enqueue(async () => { await backend.invoke("toggle_minimize"); }),

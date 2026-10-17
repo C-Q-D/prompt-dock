@@ -1,0 +1,140 @@
+/* 定稿弹窗样式；背景与动画使用既有主题令牌，不引入网络资源。 */
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: var(--scrim)
+}
+.dlg {
+  position: relative;
+  margin: 0;
+  border: 0;
+  max-width: none;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  animation: dialog-in 280ms var(--ease);
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-pop)
+}
+.dlg-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px -6px 0 0
+}
+.dlg-t {
+  flex: 1;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 700
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px
+}
+.field-n {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: -6px
+}
+.lbl {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted)
+}
+.ta {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 86px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--fill);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.65;
+  resize: none;
+  outline: none;
+  transition: background-color 120ms cubic-bezier(0.2,0,0,1),box-shadow 120ms cubic-bezier(0.2,0,0,1)
+}
+.ta::placeholder {
+  color: var(--muted)
+}
+.ta:focus {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1.5px var(--ink)
+}
+.hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted)
+}
+.hint.err {
+  color: var(--danger-fg)
+}
+.meta {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--faint)
+}
+.dlg-f {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px
+}
+.dlg-fl {
+  flex: 1;
+  display: flex
+}
+.window-content {
+  display: contents;
+}
+.dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dlg {
+    animation: none;
+  }
+  .ta {
+    transition: none;
+  }
+}
+@media (forced-colors: active) {
+  .ta:focus {
+    outline: 2px solid Highlight;
+  }
+}
