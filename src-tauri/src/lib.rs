@@ -1,5 +1,7 @@
 //! 装配 Tauri 和插件；数据命令及 Windows 系统行为由后续任务接入。
 
+pub mod store;
+
 /// 启动主窗口和事件循环；启动失败时报告错误并以非零状态退出。
 pub fn run() {
     let result = tauri::Builder::default()

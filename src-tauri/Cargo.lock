@@ -2812,12 +2812,16 @@ dependencies = [
 name = "prompt-dock"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]
