@@ -1,6 +1,7 @@
 /** 主窗口唯一状态源；纯状态转换不依赖 DOM，IPC、监听和计时器由会话持有。 */
 import { get, writable } from "svelte/store";
 import * as api from "./api";
+import { cacheConfirmedTheme } from "./theme";
 import type { DeletedPrompt, PreviewState, Prompt, Settings, Snapshot, UseResult, WarningCode } from "./api";
 
 /** 可单独关闭的横幅；多个启动警告按快照顺序显示。 */
@@ -164,6 +165,7 @@ export function createDockState(backend: DockApi = api) {
         const revision = targetRevision;
         const snapshot = await backend.invoke("get_snapshot");
         savedSettings = snapshot.settings;
+        if (!disposed) cacheConfirmedTheme(snapshot.settings.theme);
         if (!disposed) store.update((state) => ({
           ...state, prompts: snapshot.prompts,
           settings: { ...snapshot.settings, theme: pendingThemeRevision === null ? snapshot.settings.theme : state.settings.theme },
@@ -202,6 +204,7 @@ export function createDockState(backend: DockApi = api) {
       if (disposed) return;
       const initial = stateFromSnapshot(snapshot, backend.getPreviewState(), Date.now());
       savedSettings = snapshot.settings;
+      cacheConfirmedTheme(snapshot.settings.theme);
       store.update((state) => ({ ...initial, targetTitle: revision === targetRevision ? initial.targetTitle : state.targetTitle }));
       scheduleToast();
     } catch (error) {
@@ -253,6 +256,7 @@ export function createDockState(backend: DockApi = api) {
         const settings = await backend.invoke("set_settings", { settings: { ...savedSettings, ...changes } });
         if (disposed) return;
         savedSettings = settings;
+        cacheConfirmedTheme(settings.theme);
         if (changes.theme !== undefined && pendingThemeRevision === revision) pendingThemeRevision = null;
         store.update((state) => ({ ...state,
           settings: { ...settings, theme: pendingThemeRevision === null ? settings.theme : state.settings.theme },

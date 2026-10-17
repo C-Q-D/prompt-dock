@@ -52,14 +52,19 @@ pub fn run() {
                 .find(|config| config.label == "main")
                 .ok_or("io:main window configuration unavailable")?;
             let builder = WebviewWindowBuilder::from_config(app, config)?;
-            // 在解析页面前应用固定主题，并让 WebView 的初始底色与 --ground 一致，避免首帧闪白。
+            // 每次导航优先采用最近确认的缓存；占位符只替换为枚举固定值，不注入任意文本。
+            let startup_theme = match theme {
+                Theme::Light => "light",
+                Theme::Dark => "dark",
+                Theme::System => "system",
+            };
+            let script = include_str!("../../src/lib/theme-init.js")
+                .replace("__PROMPT_DOCK_STARTUP_THEME__", startup_theme);
+            let builder = builder.initialization_script(script);
+            // 原生底色仍取本次启动设置；重载后的主题由注入脚本和前端快照决定。
             let builder = match theme {
-                Theme::Light => builder
-                    .initialization_script("document.documentElement.dataset.theme = 'light';")
-                    .background_color(Color(242, 242, 242, 255)),
-                Theme::Dark => builder
-                    .initialization_script("document.documentElement.dataset.theme = 'dark';")
-                    .background_color(Color(18, 18, 18, 255)),
+                Theme::Light => builder.background_color(Color(242, 242, 242, 255)),
+                Theme::Dark => builder.background_color(Color(18, 18, 18, 255)),
                 Theme::System => builder,
             };
             builder.build()?;

@@ -1,4 +1,4 @@
-/** 外观设置的主题映射与根属性更新；不读取系统偏好或写入持久化设置。 */
+/** 外观设置的主题映射、根属性与首帧缓存更新；缓存不替代后端持久化设置。 */
 import type { Theme } from "./types";
 
 /** 已解析系统偏好的主题；可直接用于根元素的 data-theme。 */
@@ -14,6 +14,15 @@ export function effectiveTheme(theme: Theme, systemDark: boolean): EffectiveThem
 /** root 是页面根元素；ready 表示快照已就绪，之前保留后端注入值；theme 是当前有效主题。 */
 export function applyRootTheme(root: Pick<HTMLElement, "dataset">, ready: boolean, theme: EffectiveTheme): void {
   if (ready) root.dataset.theme = theme;
+}
+
+/** theme 必须来自已确认快照或保存回执；缓存供重载首帧使用，存储不可用时忽略且不重试。 */
+export function cacheConfirmedTheme(theme: Theme): void {
+  try {
+    localStorage.setItem("prompt-dock.theme", theme);
+  } catch {
+    // 缓存是可丢失的显示优化，不能把已成功的后端保存变为失败。
+  }
 }
 
 /** current 是当前有效主题；返回相反的明确设置值，点击后不再跟随系统。 */
