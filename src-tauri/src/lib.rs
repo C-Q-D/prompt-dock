@@ -4,8 +4,9 @@ mod commands;
 pub mod store;
 pub mod system;
 
+use store::Theme;
 use system::window;
-use tauri::Manager;
+use tauri::{webview::Color, Manager, WebviewWindowBuilder};
 #[cfg(windows)]
 use {system::foreground::ForegroundTracker, tauri::Emitter};
 
@@ -41,7 +42,27 @@ pub fn run() {
                 .map_err(|error| format!("io:{error}"));
             let store = commands::load_store(directory);
             let always_on_top = store.settings().always_on_top;
+            let theme = store.settings().theme;
             app.manage(commands::AppState::new(store));
+            let config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|config| config.label == "main")
+                .ok_or("io:main window configuration unavailable")?;
+            let builder = WebviewWindowBuilder::from_config(app, config)?;
+            // 在解析页面前应用固定主题，并让 WebView 的初始底色与 --ground 一致，避免首帧闪白。
+            let builder = match theme {
+                Theme::Light => builder
+                    .initialization_script("document.documentElement.dataset.theme = 'light';")
+                    .background_color(Color(242, 242, 242, 255)),
+                Theme::Dark => builder
+                    .initialization_script("document.documentElement.dataset.theme = 'dark';")
+                    .background_color(Color(18, 18, 18, 255)),
+                Theme::System => builder,
+            };
+            builder.build()?;
             window::main_window(app.handle())?
                 .set_always_on_top(always_on_top)
                 .map_err(|error| format!("io:restore alwaysOnTop: {error}"))?;

@@ -3,7 +3,7 @@
   import { onMount, tick } from "svelte";
   import type { Prompt } from "./lib/api";
   import { createDockState, statusText } from "./lib/state";
-  import { effectiveTheme, themeToggle } from "./lib/theme";
+  import { applyRootTheme, effectiveTheme, themeToggle } from "./lib/theme";
   import Button from "./lib/components/Button.svelte";
   import Icon from "./lib/components/Icon.svelte";
   import IconButton from "./lib/components/IconButton.svelte";
@@ -25,7 +25,7 @@
   const status = $derived(statusText($dock.settings, $dock.targetTitle));
 
   $effect(() => {
-    document.documentElement.dataset.theme = theme;
+    applyRootTheme(document.documentElement, $dock.ready, theme);
   });
 
   onMount(() => {

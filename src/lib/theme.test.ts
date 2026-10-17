@@ -3,7 +3,21 @@ import { get } from "svelte/store";
 import { describe, expect, it } from "vitest";
 import { createMockBackend } from "./mock";
 import { createDockState } from "./state";
-import { effectiveTheme, themeToggle } from "./theme";
+import { applyRootTheme, effectiveTheme, themeToggle } from "./theme";
+
+describe("启动根主题", () => {
+  it.each([
+    [{ theme: "dark" }, "light", { theme: "dark" }],
+    [{ theme: "light" }, "dark", { theme: "light" }],
+    [{}, "light", {}],
+  ] as const)("快照前保留根属性 %s，快照就绪后才更新", (dataset, pendingTheme, expected) => {
+    const root: Pick<HTMLElement, "dataset"> = { dataset: { ...dataset } };
+    applyRootTheme(root, false, pendingTheme);
+    expect(root.dataset).toEqual(expected);
+    applyRootTheme(root, true, "dark");
+    expect(root.dataset.theme).toBe("dark");
+  });
+});
 
 describe("有效主题", () => {
   it.each([

@@ -133,6 +133,9 @@ export function createDockState(backend: DockApi = api) {
   let unlisten: (() => void) | undefined;
   let targetRevision = 0;
   let dialogVersion = 0;
+  let savedSettings = get(store).settings;
+  let themeRevision = 0;
+  let pendingThemeRevision: number | null = null;
   const pauseReasons = new Set<"pointer" | "focus">();
 
   /** 清理当前提示条定时器，不改变其文字或剩余时间。 */
@@ -160,8 +163,11 @@ export function createDockState(backend: DockApi = api) {
       try {
         const revision = targetRevision;
         const snapshot = await backend.invoke("get_snapshot");
+        savedSettings = snapshot.settings;
         if (!disposed) store.update((state) => ({
-          ...state, prompts: snapshot.prompts, settings: snapshot.settings, dirty: false,
+          ...state, prompts: snapshot.prompts,
+          settings: { ...snapshot.settings, theme: pendingThemeRevision === null ? snapshot.settings.theme : state.settings.theme },
+          dirty: false,
           targetTitle: revision === targetRevision ? snapshot.targetTitle : state.targetTitle,
         }));
         return;
@@ -195,6 +201,7 @@ export function createDockState(backend: DockApi = api) {
       const snapshot = await backend.invoke("get_snapshot");
       if (disposed) return;
       const initial = stateFromSnapshot(snapshot, backend.getPreviewState(), Date.now());
+      savedSettings = snapshot.settings;
       store.update((state) => ({ ...initial, targetTitle: revision === targetRevision ? initial.targetTitle : state.targetTitle }));
       scheduleToast();
     } catch (error) {
@@ -230,11 +237,33 @@ export function createDockState(backend: DockApi = api) {
     });
   }
 
-  /** 在队列最新设置上合并部分改动，保存成功才更新显示。 */
+  /**
+   * changes 在已确认设置上串行合并保存；只有主题同步预览，其余设置仍等保存成功。
+   * 最新主题失败时退回最近已确认值并交给统一错误反馈；旧回执不能覆盖较新的选择。
+   */
   function setSettings(changes: Partial<Settings>): Promise<void> {
+    if (disposed) return Promise.resolve();
+    const revision = changes.theme === undefined ? themeRevision : ++themeRevision;
+    if (changes.theme !== undefined) {
+      pendingThemeRevision = revision;
+      store.update((state) => ({ ...state, settings: { ...state.settings, theme: changes.theme! } }));
+    }
     return enqueue(async () => {
-      const settings = await backend.invoke("set_settings", { settings: { ...get(store).settings, ...changes } });
-      if (!disposed) store.update((state) => ({ ...state, settings }));
+      try {
+        const settings = await backend.invoke("set_settings", { settings: { ...savedSettings, ...changes } });
+        if (disposed) return;
+        savedSettings = settings;
+        if (changes.theme !== undefined && pendingThemeRevision === revision) pendingThemeRevision = null;
+        store.update((state) => ({ ...state,
+          settings: { ...settings, theme: pendingThemeRevision === null ? settings.theme : state.settings.theme },
+        }));
+      } catch (error) {
+        if (!disposed && changes.theme !== undefined && pendingThemeRevision === revision) {
+          pendingThemeRevision = null;
+          store.update((state) => ({ ...state, settings: { ...state.settings, theme: savedSettings.theme } }));
+        }
+        throw error;
+      }
     });
   }
 

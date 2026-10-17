@@ -215,3 +215,86 @@ describe("命令失败", () => {
     expect(get(failed).banner).toEqual([{ title: "没能保存提示词", body: "写入文件失败：磁盘已满。刚才的改动可能没有保存。" }]);
   });
 });
+
+describe("即时主题切换", () => {
+  it("保存回执前同步显示新主题，保存失败后回退并显示原因", async () => {
+    const { backend, boundary } = setup();
+    let rejectSave!: (reason: string) => void;
+    const response = new Promise<never>((_resolve, reject) => { rejectSave = reject; });
+    const invoke: DockApi["invoke"] = (command, ...args) => command === "set_settings"
+      ? response : boundary.invoke(command, ...args);
+    const dock = createDockState({ ...boundary, invoke });
+    sessions.push(dock);
+    await dock.initialize();
+    const saving = dock.setSettings({ theme: "dark" });
+    expect(get(dock).settings.theme).toBe("dark");
+    expect((await backend.invoke("get_snapshot", undefined)).settings.theme).toBe("system");
+    rejectSave("io:磁盘已满");
+    await saving;
+    expect(get(dock).settings.theme).toBe("system");
+    expect(get(dock).banner).toEqual([{ title: "没能保存提示词", body: "写入文件失败：磁盘已满。刚才的改动可能没有保存。" }]);
+  });
+
+  it("队列前有旧回执时，旧保存成功不能覆盖最新主题选择", async () => {
+    const { backend, boundary } = setup();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const invoke: DockApi["invoke"] = async (command, ...args) => {
+      if (command === "set_settings") { entered(); await gate; }
+      return boundary.invoke(command, ...args);
+    };
+    const dock = createDockState({ ...boundary, invoke });
+    sessions.push(dock);
+    await dock.initialize();
+    const first = dock.setSettings({ theme: "dark" });
+    await started;
+    const second = dock.setSettings({ theme: "light" });
+    expect(get(dock).settings.theme).toBe("light");
+    release();
+    await first;
+    expect(get(dock).settings.theme).toBe("light");
+    await second;
+    expect((await backend.invoke("get_snapshot", undefined)).settings).toEqual({ autoPaste: true, alwaysOnTop: false, theme: "light" });
+  });
+
+  it("连续保存均失败时，旧错误保留最新预览，最终退回已确认主题", async () => {
+    const { boundary } = setup();
+    let rejectFirst!: (reason: string) => void;
+    let rejectSecond!: (reason: string) => void;
+    const firstResponse = new Promise<never>((_resolve, reject) => { rejectFirst = reject; });
+    const secondResponse = new Promise<never>((_resolve, reject) => { rejectSecond = reject; });
+    const save = vi.fn().mockReturnValueOnce(firstResponse).mockReturnValueOnce(secondResponse);
+    const invoke: DockApi["invoke"] = (command, ...args) => command === "set_settings" ? save() : boundary.invoke(command, ...args);
+    const dock = createDockState({ ...boundary, invoke });
+    sessions.push(dock);
+    await dock.initialize();
+    const first = dock.setSettings({ theme: "dark" });
+    const second = dock.setSettings({ theme: "light" });
+    rejectFirst("io:第一次保存失败");
+    await first;
+    expect(get(dock).settings.theme).toBe("light");
+    rejectSecond("io:第二次保存失败");
+    await second;
+    expect(get(dock).settings.theme).toBe("system");
+  });
+
+  it("最新主题保存失败时退回先前成功保存的主题", async () => {
+    const { boundary } = setup();
+    let rejectSave!: (reason: string) => void;
+    const response = new Promise<never>((_resolve, reject) => { rejectSave = reject; });
+    const dock = createDockState({ ...boundary });
+    sessions.push(dock);
+    await dock.initialize();
+    await dock.setSettings({ theme: "dark" });
+    const failing = createDockState({ ...boundary, invoke: (command, ...args) => command === "set_settings" ? response : boundary.invoke(command, ...args) });
+    sessions.push(failing);
+    await failing.initialize();
+    const saving = failing.setSettings({ theme: "light" });
+    expect(get(failing).settings.theme).toBe("light");
+    rejectSave("io:保存失败");
+    await saving;
+    expect(get(failing).settings.theme).toBe("dark");
+  });
+});
