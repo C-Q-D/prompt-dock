@@ -2,6 +2,15 @@
 
 Windows 上的常用提示词小窗口。点一条提示词，它会被复制，并自动粘贴回你上一个使用的窗口，例如 AI 对话框；不用每次重新输入“按你推荐的来”。
 
+## 下载
+
+到 [Releases](https://github.com/C-Q-D/prompt-dock/releases/latest) 下载最新版本：
+
+- `prompt-dock_<版本>_x64-setup.exe`：安装版，推荐。
+- `prompt-dock_<版本>_x64_portable.exe`：免安装版，下载后直接双击运行。
+
+运行需要 Windows 10/11 x64 和 WebView2。Windows 11 自带 WebView2；Windows 10 如果没有，安装版会自动安装。程序没有代码签名，第一次运行时如果出现“Windows 已保护你的电脑”，点“更多信息”→“仍要运行”。
+
 ## 功能
 
 - **点一下就粘贴**：文字进剪贴板，切回上一个窗口并按 Ctrl+V。窗口底部显示当前目标窗口的标题。关闭“自动粘贴”后只复制。
