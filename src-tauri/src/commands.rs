@@ -57,7 +57,7 @@ pub(crate) struct UseResult {
 }
 
 /// 从宿主解析的数据目录中打开 prompts.json；目录解析或打开失败时记日志并降级。
-/// 降级实例不可写，避免启动恢复覆盖未能读取的数据；不会因这类错误 panic。
+/// 降级实例报告 data_file_unavailable 且不可写，保留原文件；不会因这类错误 panic。
 pub(crate) fn load_store(data_directory: Result<PathBuf, String>) -> Store {
     match data_directory.and_then(|directory| Store::open(directory.join("prompts.json"))) {
         Ok(store) => store,
@@ -335,7 +335,7 @@ mod tests {
             serde_json::to_value(snapshot_from_store(&store)).unwrap(),
             json!({
                 "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
-                "targetTitle": null, "warnings": ["data_file_corrupt"]
+                "targetTitle": null, "warnings": ["data_file_unavailable"]
             })
         );
         assert_eq!(
@@ -357,7 +357,7 @@ mod tests {
             serde_json::to_value(snapshot_from_store(&store)).unwrap(),
             json!({
                 "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
-                "targetTitle": null, "warnings": ["data_file_corrupt"]
+                "targetTitle": null, "warnings": ["data_file_unavailable"]
             })
         );
         assert!(store
@@ -365,6 +365,67 @@ mod tests {
             .unwrap_err()
             .starts_with("io:"));
         assert_eq!(fs::read(protected).unwrap(), b"original content");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn corrupt_file_backup_failure_starts_unavailable_and_preserves_original() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const FILE_SHARE_READ: u32 = 0x0000_0001;
+        let dir = test_dir();
+        let path = dir.path().join("prompts.json");
+        let original = b"{ broken json";
+        fs::write(&path, original).unwrap();
+        // 允许 Store 读取，但不共享 DELETE 权限，稳定阻止 Windows 重命名备份。
+        let _read_only_share = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&path)
+            .unwrap();
+        assert_eq!(fs::read(&path).unwrap(), original, "前提：原文件仍可读取");
+
+        let mut store = load_store(Ok(dir.path().to_path_buf()));
+        assert_eq!(
+            serde_json::to_value(snapshot_from_store(&store)).unwrap(),
+            json!({
+                "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
+                "targetTitle": null, "warnings": ["data_file_unavailable"]
+            })
+        );
+        assert!(store
+            .add_prompt("不能覆盖未备份的文件")
+            .unwrap_err()
+            .starts_with("io:"));
+        assert_eq!(fs::read(path).unwrap(), original);
+        assert_eq!(
+            fs::read_dir(dir.path()).unwrap().count(),
+            1,
+            "备份失败不能产生备份或其他文件"
+        );
+    }
+
+    #[test]
+    fn unsupported_version_starts_unavailable_without_modifying_original() {
+        let dir = test_dir();
+        let path = dir.path().join("prompts.json");
+        let original =
+            br#"{"version":2,"settings":{"autoPaste":false,"alwaysOnTop":true},"prompts":[]}"#;
+        fs::write(&path, original).unwrap();
+        let mut store = load_store(Ok(dir.path().to_path_buf()));
+        assert_eq!(
+            serde_json::to_value(snapshot_from_store(&store)).unwrap(),
+            json!({
+                "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
+                "targetTitle": null, "warnings": ["data_file_unavailable"]
+            })
+        );
+        assert!(store
+            .add_prompt("不能覆盖新版数据")
+            .unwrap_err()
+            .starts_with("io:"));
+        assert_eq!(fs::read(path).unwrap(), original);
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 }

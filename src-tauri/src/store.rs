@@ -41,7 +41,10 @@ impl Default for Settings {
 #[serde(rename_all = "snake_case")]
 pub enum WarningCode {
     HotkeyBusy,
+    /// 解析失败且原文件已成功改名备份，可从空列表重新保存。
     DataFileCorrupt,
+    /// 原文件未改动，以只读空列表启动，写入返回 io:。
+    DataFileUnavailable,
 }
 
 /// 删除结果保留原提示词和原下标，供前端撤销时原位恢复。
@@ -110,8 +113,8 @@ impl Store {
         })
     }
 
-    /// 构造不可写的空列表和默认设置，用于数据目录或文件无法打开的启动降级。
-    /// reason 是原始错误；写入时返回其 `io:` 形式，不另选路径或覆盖原文件。
+    /// 构造不可写的空列表、默认设置和 `data_file_unavailable` 警告，用于启动降级。
+    /// reason 为目录解析、文件读取、版本检查或备份错误；写入返回其 `io:` 形式，保留原文件。
     pub fn unavailable(reason: String) -> Self {
         let error = if reason.starts_with("io:") {
             reason
@@ -121,7 +124,7 @@ impl Store {
         Self {
             path: Err(error),
             data: DataFile::default(),
-            warnings: vec![WarningCode::DataFileCorrupt],
+            warnings: vec![WarningCode::DataFileUnavailable],
         }
     }
 
