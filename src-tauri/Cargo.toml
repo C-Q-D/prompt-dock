@@ -1,0 +1,19 @@
+[package]
+name = "prompt-dock"
+version = "0.1.0"
+description = "Windows 本地常用提示词窗口"
+edition = "2021"
+
+[lib]
+name = "prompt_dock_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
