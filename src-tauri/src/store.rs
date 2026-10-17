@@ -250,7 +250,15 @@ impl Store {
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent).map_err(|error| format!("io:{error}"))?;
-        let mut temporary = NamedTempFile::new_in(parent).map_err(|error| format!("io:{error}"))?;
+        // MSIX 宿主可能把 AppData 的逻辑路径重定向到另一卷。源和目标都用同一
+        // 实际目录，避免 Win32 重命名在两种路径解释之间错误地判为跨卷移动。
+        let parent = fs::canonicalize(parent).map_err(|error| format!("io:{error}"))?;
+        let destination = parent.join(
+            path.file_name()
+                .ok_or_else(|| "io:data path has no file name".to_owned())?,
+        );
+        let mut temporary =
+            NamedTempFile::new_in(&parent).map_err(|error| format!("io:{error}"))?;
         serde_json::to_writer_pretty(temporary.as_file_mut(), &next)
             .map_err(|error| format!("io:{error}"))?;
         temporary
@@ -259,7 +267,7 @@ impl Store {
             .map_err(|error| format!("io:{error}"))?;
         // persist 使用重命名替换；失败时临时文件仍由 RAII 清理，不触碰原目标。
         temporary
-            .persist(path)
+            .persist(destination)
             .map_err(|error| format!("io:{}", error.error))?;
         self.data = next;
         Ok(())
@@ -340,6 +348,30 @@ mod tests {
         );
         assert!(store.warnings().is_empty());
         assert!(!path.exists(), "读取缺失文件不应制造空文件");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn first_save_in_profile_directory_persists_and_replaces() {
+        // MSIX 宿主可把此路径重定向到另一卷；独占临时目录不接触真实提示词文件。
+        let dir = tempfile::Builder::new()
+            .prefix("prompt-dock-store-test-")
+            .tempdir_in(std::env::var_os("APPDATA").unwrap())
+            .unwrap();
+        let path = dir.path().join("prompts.json");
+        let mut store = Store::open(&path).unwrap();
+        assert!(!path.exists());
+        let added = store.add_prompt("首次保存").unwrap();
+        store.update_prompt(&added.id, "再次保存").unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["prompts"].as_array().unwrap().len(), 1);
+        assert_eq!(saved["prompts"][0]["text"], "再次保存");
+        assert_eq!(saved["prompts"][0]["count"], 0);
+        assert_eq!(
+            fs::read_dir(dir.path()).unwrap().count(),
+            1,
+            "成功后只保留数据文件"
+        );
     }
 
     #[test]
