@@ -1,0 +1,68 @@
+/* 定稿主题令牌；字体按离线系统字体约定替换。 */
+:root {
+  color-scheme: light;
+  --ground: #f2f2f2;
+  --surface: #ffffff;
+  --fill: #f2f2f2;
+  --fill-hover: #e6e6e6;
+  --ink: #0a0a0a;
+  --ink-hover: #262626;
+  --on-ink: #ffffff;
+  --text-2: #404040;
+  --text-3: #525252;
+  --muted: #737373;
+  --faint: #8a8a8a;
+  --line: #ededed;
+  --amber-bg: #fbf1e3;
+  --amber-fg: #6b4a14;
+  --danger-bg: #fdf3f2;
+  --danger-fg: #8f2a22;
+  --switch-off: #d4d4d4;
+  --scrim: rgba(10,10,10,0.4);
+  --shadow-pop: 0 8px 24px rgba(0,0,0,0.12),0 0 0 1px rgba(0,0,0,0.06);
+  --ring-focus: 0 0 0 2px #ffffff,0 0 0 4px #0a0a0a;
+  --desk: #d9d9d9
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --ground: #121212;
+    --surface: #1c1c1c;
+    --fill: #2a2a2a;
+    --fill-hover: #333333;
+    --ink: #f5f5f5;
+    --ink-hover: #d4d4d4;
+    --on-ink: #0a0a0a;
+    --text-2: #d4d4d4;
+    --text-3: #b5b5b5;
+    --muted: #9a9a9a;
+    --faint: #858585;
+    --line: #2a2a2a;
+    --amber-bg: #33260f;
+    --amber-fg: #f0c27f;
+    --danger-bg: #3a1715;
+    --danger-fg: #f2a39b;
+    --switch-off: #404040;
+    --scrim: rgba(0,0,0,0.6);
+    --shadow-pop: 0 8px 24px rgba(0,0,0,0.6),0 0 0 1px rgba(255,255,255,0.08);
+    --ring-focus: 0 0 0 2px #1c1c1c,0 0 0 4px #f5f5f5;
+    --desk: #000000
+  }
+}
+:root {
+  --sans: "Microsoft YaHei","PingFang SC",sans-serif;
+  --mono: Consolas,ui-monospace,monospace;
+  --ease: cubic-bezier(0.2,0,0,1);
+  font-family: var(--sans);
+  color: var(--ink);
+  background: var(--ground)
+}
+body {
+  margin: 0
+}
+button,textarea {
+  font-family: inherit
+}
+button {
+  touch-action: manipulation
+}
