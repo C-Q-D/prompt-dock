@@ -124,7 +124,7 @@ function shouldSort(state: DockState, onlyIfDirty: boolean): boolean {
 export function createDockState(backend: DockApi = api) {
   const store = writable<DockState>({
     previewSize: null,
-    prompts: [], settings: { autoPaste: true, alwaysOnTop: false }, targetTitle: null,
+    prompts: [], settings: { autoPaste: true, alwaysOnTop: false, theme: "system" }, targetTitle: null,
     banner: [], toast: null, dialog: null, dirty: false, ready: false,
   });
   let disposed = false;

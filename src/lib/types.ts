@@ -2,8 +2,10 @@
 
 /** 一条提示词；count 为累计使用次数，数组顺序即显示顺序。 */
 export type Prompt = { id: string; text: string; count: number };
-/** 每次完整提交的窗口与粘贴设置。 */
-export type Settings = { autoPaste: boolean; alwaysOnTop: boolean };
+/** system 跟随操作系统；手动切换后保存明确的 light 或 dark。 */
+export type Theme = "system" | "light" | "dark";
+/** 每次完整提交的窗口、粘贴与外观设置。 */
+export type Settings = { autoPaste: boolean; alwaysOnTop: boolean; theme: Theme };
 /** 启动时由后端报告的数据或快捷键问题。 */
 export type WarningCode = "hotkey_busy" | "data_file_corrupt" | "data_file_unavailable";
 /** 启动或 not_found 后重新读取的完整状态。 */

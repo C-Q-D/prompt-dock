@@ -136,7 +136,7 @@ describe("横幅和目标", () => {
   it("每个启动警告分别显示，关闭一条保留其他警告", async () => {
     const { boundary } = setup();
     const snapshot: Snapshot = {
-      prompts: [], settings: { autoPaste: true, alwaysOnTop: false }, targetTitle: null,
+      prompts: [], settings: { autoPaste: true, alwaysOnTop: false, theme: "system" }, targetTitle: null,
       warnings: ["hotkey_busy", "data_file_corrupt", "data_file_unavailable"],
     };
     const invoke: DockApi["invoke"] = (command, ...args) => command === "get_snapshot"
@@ -155,7 +155,7 @@ describe("横幅和目标", () => {
   });
 
   it("focus_failed 给出切换失败说明，复制结果用已复制提示条", () => {
-    const base = stateFromSnapshot({ prompts: [{ id: "1", text: "继续", count: 0 }], settings: { autoPaste: true, alwaysOnTop: false }, targetTitle: "编辑器", warnings: [] }, null, 10000);
+    const base = stateFromSnapshot({ prompts: [{ id: "1", text: "继续", count: 0 }], settings: { autoPaste: true, alwaysOnTop: false, theme: "system" }, targetTitle: "编辑器", warnings: [] }, null, 10000);
     const failed = applyUseResult(base, { kind: "focus_failed", targetTitle: "编辑器", prompt: { id: "1", text: "继续", count: 1 } }, 10000);
     expect(failed.banner).toEqual([{ title: "没能粘贴到 编辑器", body: "没能切换到这个窗口。内容已复制，请到窗口里按 Ctrl+V。" }]);
     const copied = applyUseResult(failed, { kind: "copied", targetTitle: null, prompt: { id: "1", text: "继续", count: 2 } }, 10000);
@@ -194,7 +194,7 @@ describe("状态栏", () => {
     [true, null, { lead: "粘贴到：", target: "先点一下要粘贴的窗口" }],
     [false, "Claude", { lead: "只复制，不粘贴", target: "" }],
   ] as const)("autoPaste=%s、target=%s 时显示准确文案", (autoPaste, target, expected) => {
-    expect(statusText({ autoPaste, alwaysOnTop: false }, target)).toEqual(expected);
+    expect(statusText({ autoPaste, alwaysOnTop: false, theme: "system" }, target)).toEqual(expected);
   });
 });
 

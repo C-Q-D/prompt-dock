@@ -1,4 +1,10 @@
-/* 定稿主题令牌；字体按离线系统字体约定替换。 */
+/* 定稿主题令牌；手动选择覆盖系统偏好，字体随应用离线打包。 */
+@font-face {
+  font-family: "Paper Mono";
+  src: url("../assets/fonts/PaperMono-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-display: block;
+}
 :root {
   color-scheme: light;
   --ground: #f2f2f2;
@@ -24,7 +30,7 @@
   --desk: #d9d9d9
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --ground: #121212;
     --surface: #1c1c1c;
@@ -49,11 +55,36 @@
     --desk: #000000
   }
 }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #121212;
+  --surface: #1c1c1c;
+  --fill: #2a2a2a;
+  --fill-hover: #333333;
+  --ink: #f5f5f5;
+  --ink-hover: #d4d4d4;
+  --on-ink: #0a0a0a;
+  --text-2: #d4d4d4;
+  --text-3: #b5b5b5;
+  --muted: #9a9a9a;
+  --faint: #858585;
+  --line: #2a2a2a;
+  --amber-bg: #33260f;
+  --amber-fg: #f0c27f;
+  --danger-bg: #3a1715;
+  --danger-fg: #f2a39b;
+  --switch-off: #404040;
+  --scrim: rgba(0,0,0,0.6);
+  --shadow-pop: 0 8px 24px rgba(0,0,0,0.6),0 0 0 1px rgba(255,255,255,0.08);
+  --ring-focus: 0 0 0 2px #1c1c1c,0 0 0 4px #f5f5f5;
+  --desk: #000000
+}
 :root {
-  --sans: "Microsoft YaHei","PingFang SC",sans-serif;
-  --mono: Consolas,ui-monospace,monospace;
+  --sans: "Paper Mono","Microsoft YaHei","PingFang SC",sans-serif;
+  --mono: "Paper Mono",Consolas,ui-monospace,monospace;
   --ease: cubic-bezier(0.2,0,0,1);
   font-family: var(--sans);
+  font-weight: 500;
   color: var(--ink);
   background: var(--ground)
 }
@@ -61,7 +92,8 @@ body {
   margin: 0
 }
 button,textarea {
-  font-family: inherit
+  font-family: inherit;
+  font-weight: 500
 }
 button {
   touch-action: manipulation

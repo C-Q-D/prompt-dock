@@ -259,7 +259,7 @@ mod tests {
                     { "id": ID, "text": "按你推荐的来", "count": 2 },
                     { "id": OTHER_ID, "text": "请继续", "count": 8 }
                 ],
-                "settings": { "autoPaste": false, "alwaysOnTop": true },
+                "settings": { "autoPaste": false, "alwaysOnTop": true, "theme": "system" },
                 "targetTitle": null,
                 "warnings": []
             })
@@ -370,7 +370,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(snapshot_from_store(&store, None, false)).unwrap(),
             json!({
-                "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
+                "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false, "theme": "system" },
                 "targetTitle": null, "warnings": ["data_file_unavailable"]
             })
         );
@@ -392,7 +392,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(snapshot_from_store(&store, None, false)).unwrap(),
             json!({
-                "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
+                "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false, "theme": "system" },
                 "targetTitle": null, "warnings": ["data_file_unavailable"]
             })
         );
@@ -426,7 +426,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(snapshot_from_store(&store, None, false)).unwrap(),
             json!({
-                "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
+                "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false, "theme": "system" },
                 "targetTitle": null, "warnings": ["data_file_unavailable"]
             })
         );
@@ -453,7 +453,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(snapshot_from_store(&store, None, false)).unwrap(),
             json!({
-                "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false },
+                "prompts": [], "settings": { "autoPaste": true, "alwaysOnTop": false, "theme": "system" },
                 "targetTitle": null, "warnings": ["data_file_unavailable"]
             })
         );

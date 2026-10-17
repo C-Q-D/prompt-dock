@@ -30,7 +30,7 @@ export function createMockBackend(value: string | null = null) {
   const scenario = (scenarios.includes(value ?? "") ? value : "main") as Scenario;
   const snapshot: Snapshot = {
     prompts: structuredClone(examples),
-    settings: { autoPaste: scenario !== "min", alwaysOnTop: ["min", "paste-ok", "paste-fail", "add", "edit", "deleted"].includes(scenario) },
+    settings: { autoPaste: scenario !== "min", alwaysOnTop: ["min", "paste-ok", "paste-fail", "add", "edit", "deleted"].includes(scenario), theme: "system" },
     targetTitle: ["empty", "hotkey-busy"].includes(scenario) ? null : scenario === "paste-fail" ? "任务管理器" : "Claude",
     warnings: scenario === "hotkey-busy" ? ["hotkey_busy"] : [],
   };

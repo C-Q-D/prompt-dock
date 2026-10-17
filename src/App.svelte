@@ -3,6 +3,7 @@
   import { onMount, tick } from "svelte";
   import type { Prompt } from "./lib/api";
   import { createDockState, statusText } from "./lib/state";
+  import { effectiveTheme, themeToggle } from "./lib/theme";
   import Button from "./lib/components/Button.svelte";
   import Icon from "./lib/components/Icon.svelte";
   import IconButton from "./lib/components/IconButton.svelte";
@@ -13,6 +14,9 @@
   import "./lib/window.css";
 
   const dock = createDockState();
+  let systemDark = $state(window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const theme = $derived(effectiveTheme($dock.settings.theme, systemDark));
+  const themeButton = $derived(themeToggle(theme));
   let list: HTMLDivElement;
   let focusedId = $state<string | null>(null);
   let addButton = $state<HTMLButtonElement>();
@@ -20,9 +24,20 @@
   let dialogRowIndex = 0;
   const status = $derived(statusText($dock.settings, $dock.targetTitle));
 
+  $effect(() => {
+    document.documentElement.dataset.theme = theme;
+  });
+
   onMount(() => {
+    const preference = window.matchMedia("(prefers-color-scheme: dark)");
+    const updatePreference = () => { systemDark = preference.matches; };
+    updatePreference();
+    preference.addEventListener("change", updatePreference);
     void dock.initialize();
-    return () => dock.destroy();
+    return () => {
+      preference.removeEventListener("change", updatePreference);
+      dock.destroy();
+    };
   });
 
   /** 方向键移动真实行焦点，边界停在首尾；Enter 采用原生按钮点击语义。 */
@@ -73,6 +88,8 @@
   <div class="window-content" inert={!!$dock.dialog}>
   <header class="tbar" data-tauri-drag-region>
     <span class="tbar-t" data-tauri-drag-region>常用提示词</span>
+    <IconButton icon={themeButton.icon} label={themeButton.label} disabled={!$dock.ready}
+      onclick={() => void dock.setSettings({ theme: themeButton.theme })} />
     <IconButton icon="pin" label={$dock.settings.alwaysOnTop ? "取消置顶" : "置顶"}
       active={$dock.settings.alwaysOnTop} pressed={$dock.settings.alwaysOnTop} disabled={!$dock.ready}
       onclick={() => void dock.setSettings({ alwaysOnTop: !$dock.settings.alwaysOnTop })} />

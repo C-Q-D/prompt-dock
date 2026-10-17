@@ -19,12 +19,25 @@ pub struct Prompt {
     pub count: u64,
 }
 
-/// 持久化的用户设置；系统层负责把设置作用到窗口和粘贴流程。
+/// 持久化的外观选择；System 保留旧文件跟随系统的行为。
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+/// 持久化的用户设置；前端负责主题，系统层负责窗口和粘贴流程。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub auto_paste: bool,
     pub always_on_top: bool,
+    // 旧版 version 1 文件没有此字段，不能因此被当作损坏数据备份并清空。
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 impl Default for Settings {
@@ -32,6 +45,7 @@ impl Default for Settings {
         Self {
             auto_paste: true,
             always_on_top: false,
+            theme: Theme::System,
         }
     }
 }
@@ -334,6 +348,44 @@ mod tests {
     }
 
     #[test]
+    fn legacy_file_defaults_theme_to_system() {
+        let dir = test_dir();
+        let path = dir.path().join("prompts.json");
+        seed(&path);
+        let original = fs::read(&path).unwrap();
+        let store = Store::open(&path).unwrap();
+        assert_eq!(
+            serde_json::to_value(store.settings()).unwrap()["theme"],
+            "system"
+        );
+        assert!(store.warnings().is_empty());
+        assert_eq!(fs::read(&path).unwrap(), original, "读取旧文件不能写盘");
+        assert_eq!(store.prompts().len(), 4);
+    }
+
+    #[test]
+    fn dark_theme_survives_settings_save_and_reopen() {
+        let dir = test_dir();
+        let path = dir.path().join("prompts.json");
+        let mut store = Store::open(&path).unwrap();
+        let settings = serde_json::from_value(json!({
+            "autoPaste": false, "alwaysOnTop": true, "theme": "dark"
+        }))
+        .unwrap();
+        store.set_settings(settings).unwrap();
+        let reopened = Store::open(&path).unwrap();
+        assert_eq!(
+            serde_json::to_value(reopened.settings()).unwrap(),
+            json!({
+                "autoPaste": false, "alwaysOnTop": true, "theme": "dark"
+            })
+        );
+        let disk: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(disk["version"], 1);
+        assert_eq!(disk["settings"]["theme"], "dark");
+    }
+
+    #[test]
     fn missing_file_returns_empty_defaults() {
         let dir = test_dir();
         let path = dir.path().join("nested/prompts.json");
@@ -343,7 +395,8 @@ mod tests {
             store.settings(),
             &Settings {
                 auto_paste: true,
-                always_on_top: false
+                always_on_top: false,
+                theme: Theme::System
             }
         );
         assert!(store.warnings().is_empty());
@@ -384,6 +437,7 @@ mod tests {
             .set_settings(Settings {
                 auto_paste: false,
                 always_on_top: true,
+                theme: Theme::System,
             })
             .unwrap();
         let added = store.add_prompt("中文\n第二行 🦀").unwrap();
@@ -392,7 +446,8 @@ mod tests {
             reopened.settings(),
             &Settings {
                 auto_paste: false,
-                always_on_top: true
+                always_on_top: true,
+                theme: Theme::System
             }
         );
         assert_eq!(reopened.prompts(), store.prompts());
@@ -401,7 +456,7 @@ mod tests {
             disk,
             json!({
                 "version": 1,
-                "settings": { "autoPaste": false, "alwaysOnTop": true },
+                "settings": { "autoPaste": false, "alwaysOnTop": true, "theme": "system" },
                 "prompts": [
                     { "id": FIRST_ID, "text": "第一条", "count": 2 },
                     { "id": SECOND_ID, "text": "第二条", "count": 5 },
@@ -448,7 +503,8 @@ mod tests {
             store.settings(),
             &Settings {
                 auto_paste: true,
-                always_on_top: false
+                always_on_top: false,
+                theme: Theme::System
             }
         );
         assert_eq!(store.warnings(), &[WarningCode::DataFileCorrupt]);

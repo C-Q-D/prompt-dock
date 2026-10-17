@@ -50,7 +50,7 @@
   font-family: inherit;
   font-size: 13px;
   line-height: 1.6;
-  font-weight: 400;
+  font-weight: 500;
   white-space: nowrap;
   text-decoration: none;
   cursor: pointer;
@@ -176,7 +176,7 @@
 .banner-t {
   font-size: 13px;
   line-height: 1.6;
-  font-weight: 700
+  font-weight: 500
 }
 .banner-b {
   font-size: 12px;

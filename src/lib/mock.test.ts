@@ -39,9 +39,9 @@ describe("browser backend contract", () => {
   it("自动粘贴遵守设置与目标可用性，管理员目标返回阻止结果", async () => {
     const backend = createMockBackend("paste-fail");
     expect(await backend.invoke("use_prompt", { id: "1" })).toEqual({ kind: "blocked_elevated", targetTitle: "任务管理器", prompt: { id: "1", text: "按你推荐的来", count: 130 } });
-    await backend.invoke("set_settings", { settings: { autoPaste: false, alwaysOnTop: false } });
+    await backend.invoke("set_settings", { settings: { autoPaste: false, alwaysOnTop: false, theme: "system" } });
     expect(await backend.invoke("use_prompt", { id: "1" })).toEqual({ kind: "copied", targetTitle: null, prompt: { id: "1", text: "按你推荐的来", count: 131 } });
-    await backend.invoke("set_settings", { settings: { autoPaste: true, alwaysOnTop: false } });
+    await backend.invoke("set_settings", { settings: { autoPaste: true, alwaysOnTop: false, theme: "system" } });
     backend.changeTarget(null);
     expect((await backend.invoke("use_prompt", { id: "1" })).kind).toBe("copied");
     backend.changeTarget("Claude");
@@ -74,7 +74,7 @@ describe("browser backend contract", () => {
   it("画板初态匹配最小窗口、成功计次、警告、空列表和删除撤销", async () => {
     const min = createMockBackend("min");
     expect(min.getPreview()).toMatchObject({ width: 280, height: 320 });
-    expect((await min.invoke("get_snapshot", undefined)).settings).toEqual({ autoPaste: false, alwaysOnTop: true });
+    expect((await min.invoke("get_snapshot", undefined)).settings).toEqual({ autoPaste: false, alwaysOnTop: true, theme: "system" });
     expect((await createMockBackend("paste-ok").invoke("get_snapshot", undefined)).prompts[2].count).toBe(42);
     expect((await createMockBackend("hotkey-busy").invoke("get_snapshot", undefined))).toMatchObject({ warnings: ["hotkey_busy"], targetTitle: null });
     expect((await createMockBackend("empty").invoke("get_snapshot", undefined)).prompts).toEqual([]);
