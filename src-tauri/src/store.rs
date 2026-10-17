@@ -71,10 +71,11 @@ impl Default for DataFile {
     }
 }
 
-/// 一个数据文件及其当前内容；调用方负责对同一路径的操作进行串行化。
-/// 每次修改先保存文件，成功后才提交内存；IO 失败时保留原内存。
+/// 提示词数据及持久化状态；正常实例对应一个文件，启动降级实例不可写。
+/// 调用方串行化同一路径的操作；每次修改先保存文件，成功后才提交内存。
 pub struct Store {
-    path: PathBuf,
+    // Err 保留启动错误，使降级实例可读取但不能覆盖未成功读取的文件。
+    path: Result<PathBuf, String>,
     data: DataFile,
     warnings: Vec<WarningCode>,
 }
@@ -103,10 +104,25 @@ impl Store {
             return Err(format!("io:unsupported data version {}", data.version));
         }
         Ok(Self {
-            path,
+            path: Ok(path),
             data,
             warnings,
         })
+    }
+
+    /// 构造不可写的空列表和默认设置，用于数据目录或文件无法打开的启动降级。
+    /// reason 是原始错误；写入时返回其 `io:` 形式，不另选路径或覆盖原文件。
+    pub fn unavailable(reason: String) -> Self {
+        let error = if reason.starts_with("io:") {
+            reason
+        } else {
+            format!("io:{reason}")
+        };
+        Self {
+            path: Err(error),
+            data: DataFile::default(),
+            warnings: vec![WarningCode::DataFileCorrupt],
+        }
     }
 
     /// 按当前显示顺序借用列表；不排序、不触发磁盘写入。
@@ -119,7 +135,7 @@ impl Store {
         &self.data.settings
     }
 
-    /// 借用本次打开文件时产生的警告；普通保存不会清除警告。
+    /// 借用本次加载或降级时产生的警告；普通保存不会清除警告。
     pub fn warnings(&self) -> &[WarningCode] {
         &self.warnings
     }
@@ -225,8 +241,8 @@ impl Store {
     /// 将候选数据 next 原子替换到磁盘后提交内存；任一步失败返回 `io:<原因>`。
     /// 临时文件必须与目标文件同目录，避免跨文件系统移动变成复制。
     fn commit(&mut self, next: DataFile) -> Result<(), String> {
-        let parent = self
-            .path
+        let path = self.path.as_ref().map_err(Clone::clone)?;
+        let parent = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
@@ -240,7 +256,7 @@ impl Store {
             .map_err(|error| format!("io:{error}"))?;
         // persist 使用重命名替换；失败时临时文件仍由 RAII 清理，不触碰原目标。
         temporary
-            .persist(&self.path)
+            .persist(path)
             .map_err(|error| format!("io:{}", error.error))?;
         self.data = next;
         Ok(())
