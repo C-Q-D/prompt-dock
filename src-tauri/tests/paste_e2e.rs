@@ -28,10 +28,10 @@ use windows::{
             },
             WindowsAndMessaging::{
                 CreateWindowExW, DestroyWindow, GetCursorPos, GetForegroundWindow, GetWindowRect,
-                GetWindowThreadProcessId, IsWindow, PostMessageW, SendMessageTimeoutW,
+                GetWindowThreadProcessId, IsIconic, IsWindow, PostMessageW, SendMessageTimeoutW,
                 SetCursorPos, SetForegroundWindow, SetWindowPos, ShowWindow, WindowFromPoint,
                 HWND_NOTOPMOST, HWND_TOPMOST, SMTO_ABORTIFHUNG, SWP_NOACTIVATE, SWP_NOMOVE,
-                SWP_NOSIZE, SW_SHOW, WM_CLOSE, WM_GETTEXT, WS_OVERLAPPEDWINDOW,
+                SWP_NOSIZE, SW_SHOW, WM_APP, WM_CLOSE, WM_GETTEXT, WS_OVERLAPPEDWINDOW,
             },
         },
     },
@@ -42,6 +42,7 @@ const WAIT_LIMIT: Duration = Duration::from_secs(5);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
 const CLEANUP_BUDGET: Duration = Duration::from_secs(2);
 const WORKER_OUTPUT: &str = "PROMPT_DOCK_T2_WORKER_OUTPUT";
+const SCENARIO: &str = "PROMPT_DOCK_T2_SCENARIO";
 const TARGET_PID: &str = "PROMPT_DOCK_T2_TARGET_PID";
 
 /// 监督进程直接启动的子进程；启动记录创建时间，强制清理前核对，避免误操作其他进程。
@@ -354,10 +355,20 @@ fn click_fixture(hwnd: HWND, expected_pid: u32) {
 fn paste_round_trip_and_missing_or_closed_targets() {
     if let Some(output) = std::env::var_os(WORKER_OUTPUT) {
         let pid = std::env::var(TARGET_PID).unwrap().parse().unwrap();
-        run_scenario(Path::new(&output), pid);
+        if std::env::var(SCENARIO).unwrap() == "hung" {
+            run_hung_scenario(Path::new(&output), pid);
+        } else {
+            run_scenario(Path::new(&output), pid);
+        }
         return;
     }
     let deadline = Instant::now() + TOTAL_TIMEOUT;
+    run_supervised("normal", deadline);
+    run_supervised("hung", deadline);
+}
+
+/// 两个桌面场景串行共用总期限，避免焦点竞争；监督者始终持有并核对自己启动的进程句柄。
+fn run_supervised(scenario: &str, deadline: Instant) {
     let directory = test_dir();
     let output = directory.path().join("edit.txt");
     let executable = std::env::current_exe().unwrap();
@@ -368,10 +379,12 @@ fn paste_round_trip_and_missing_or_closed_targets() {
         .unwrap()
         .join("examples")
         .join("paste_target.exe");
-    let mut target = OwnedProcess::spawn(
-        Command::new(example).arg(&output),
-        Some(output.with_extension("ready")),
-    );
+    let mut target_command = Command::new(example);
+    target_command.arg(&output);
+    if scenario == "hung" {
+        target_command.arg("--hang-minimized");
+    }
+    let mut target = OwnedProcess::spawn(&mut target_command, Some(output.with_extension("ready")));
     let mut worker = OwnedProcess::spawn(
         Command::new(executable)
             .args([
@@ -380,6 +393,7 @@ fn paste_round_trip_and_missing_or_closed_targets() {
                 "--ignored",
                 "--nocapture",
             ])
+            .env(SCENARIO, scenario)
             .env(WORKER_OUTPUT, &output)
             .env(TARGET_PID, target.child.id().to_string()),
         None,
@@ -489,6 +503,74 @@ fn run_scenario(output: &Path, target_pid: u32) {
     assert!(
         tracker.current_target().unwrap().is_none(),
         "closed target must be invalidated while our source is foreground"
+    );
+    tracker.stop().unwrap();
+}
+
+/// 最小化且不泵消息的独立目标必须在一秒内失败；恢复泵送后检查没有延迟粘贴。
+fn run_hung_scenario(output: &Path, target_pid: u32) {
+    let (hwnd, edit) = wait_until("hung target ready", || {
+        fixture_handles(&output.with_extension("ready"))
+    });
+    let mut edit_pid = 0;
+    // SAFETY: 只查询夹具 EDIT 的身份，未验证之前不发窗口消息或输入。
+    unsafe {
+        GetWindowThreadProcessId(edit, Some(&mut edit_pid));
+    }
+    assert_eq!(edit_pid, target_pid);
+    click_fixture(hwnd, target_pid);
+    let tracker = ForegroundTracker::start(|_| {}).unwrap();
+    let target = wait_until("tracker observes hung fixture before minimizing", || {
+        tracker
+            .current_target()
+            .unwrap()
+            .filter(|target| target.pid == target_pid)
+    });
+    let _source = SourceWindow::show();
+    let mut clipboard = arboard::Clipboard::new().unwrap();
+    clipboard.set_text(EXPECTED).unwrap();
+    // SAFETY: 根窗口刚通过 click_fixture 核对 PID；WM_APP 不携带指针，不等待目标线程。
+    unsafe {
+        PostMessageW(Some(hwnd), WM_APP, WPARAM(0), LPARAM(0)).unwrap();
+    }
+    wait_until("fixture is minimized and stops pumping", || {
+        // SAFETY: IsIconic 查询状态，不向目标同步发消息。
+        (output.with_extension("hung").exists() && unsafe { IsIconic(hwnd) }.as_bool())
+            .then_some(())
+    });
+    let started = Instant::now();
+    let outcome = paste_to_target(true, Some(target)).unwrap();
+    let elapsed = started.elapsed();
+    eprintln!(
+        "minimized unresponsive target: elapsed={elapsed:?}, kind={:?}",
+        outcome.kind
+    );
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "paste must return within one second: {elapsed:?}"
+    );
+    assert_eq!(outcome.kind, PasteKind::FocusFailed);
+    assert_eq!(
+        outcome.target_title.as_deref(),
+        Some("prompt-dock-t2 paste target")
+    );
+    wait_until("fixture resumes pumping", || {
+        output.with_extension("resumed").exists().then_some(())
+    });
+    assert_eq!(
+        edit_text(edit),
+        "",
+        "unresponsive target must not receive delayed paste"
+    );
+    request_close(hwnd, target_pid);
+    wait_until("hung fixture exits and writes output", || {
+        // SAFETY: 失效 HWND 可安全查询，不等待窗口线程。
+        (!unsafe { IsWindow(Some(hwnd)) }.as_bool() && output.exists()).then_some(())
+    });
+    assert_eq!(
+        fs::read_to_string(output).unwrap(),
+        "",
+        "exit text must remain empty"
     );
     tracker.stop().unwrap();
 }

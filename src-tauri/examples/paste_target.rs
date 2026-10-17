@@ -1,9 +1,9 @@
 //! 独立的普通 EDIT 测试窗口；关闭时将内容以 UTF-8 写到第一个参数指定的文件。
-//! 同目录的 .ready 文件仅公布本进程窗口句柄，供桌面测试确认目标身份。
+//! 同目录的 .ready 文件公布窗口句柄；--hang-minimized 启用 WM_APP 触发的最小化无响应夹具。
 
 #[cfg(windows)]
 use {
-    std::{fs, path::PathBuf},
+    std::{fs, path::PathBuf, thread, time::Duration},
     windows::{
         core::w,
         Win32::{
@@ -15,8 +15,8 @@ use {
                     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetDlgItem,
                     GetMessageW, GetWindowTextLengthW, GetWindowTextW, PostQuitMessage,
                     RegisterClassW, SetForegroundWindow, ShowWindow, TranslateMessage,
-                    CW_USEDEFAULT, HMENU, MSG, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_SETFOCUS,
-                    WNDCLASSW, WS_BORDER, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+                    CW_USEDEFAULT, HMENU, MSG, SW_MINIMIZE, SW_SHOW, WM_APP, WM_CLOSE, WM_DESTROY,
+                    WM_SETFOCUS, WNDCLASSW, WS_BORDER, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
                 },
             },
         },
@@ -47,6 +47,7 @@ impl Drop for TestWindow {
 }
 
 /// 创建普通窗口并泵送消息；接到 WM_CLOSE 后先读回 EDIT，再由守卫销毁窗口。
+/// 可选 --hang-minimized 在测试发来 WM_APP 后最小化并停泵三秒，之后恢复泵送以验证无延迟输入。
 #[cfg(windows)]
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let output = PathBuf::from(
@@ -54,6 +55,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .nth(1)
             .ok_or("expected output file argument")?,
     );
+    let hang_minimized = match std::env::args_os().nth(2) {
+        None => false,
+        Some(flag) if flag == "--hang-minimized" => true,
+        Some(_) => return Err("unknown fixture mode".into()),
+    };
     // SAFETY: 类、标题为静态 UTF-16，WNDPROC 生命周期覆盖消息循环；所有窗口均属于本线程。
     unsafe {
         let instance = HINSTANCE(GetModuleHandleW(None)?.0);
@@ -111,6 +117,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             if result == 0 {
                 break;
+            }
+            if hang_minimized && message.message == WM_APP {
+                // 在所属线程同步最小化，然后显式停止泵送，稳定覆盖外部还原无响应窗口的路径。
+                let _ = ShowWindow(window.0, SW_MINIMIZE);
+                fs::write(output.with_extension("hung"), b"minimized")?;
+                thread::sleep(Duration::from_secs(3));
+                fs::write(output.with_extension("resumed"), b"pumping")?;
+                continue;
             }
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);

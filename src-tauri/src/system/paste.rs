@@ -37,7 +37,7 @@ use {
                 VIRTUAL_KEY, VK_CONTROL, VK_V,
             },
             WindowsAndMessaging::{
-                GetForegroundWindow, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
+                GetForegroundWindow, IsIconic, SetForegroundWindow, ShowWindowAsync, SW_RESTORE,
             },
         },
     },
@@ -123,29 +123,28 @@ fn process_is_elevated(pid: u32) -> windows::core::Result<bool> {
     }
 }
 
-/// 必要时还原目标并尝试切为前台；每 20ms 确认一次，最多等待 300ms，不绕过前台锁。
+/// 异步还原目标并尝试切为前台；还原及前台确认共用 300ms 期限，每 20ms 检查一次。
+/// 不连接输入队列或绕过前台锁，避免独立目标无响应时把激活请求变成同步等待。
 #[cfg(windows)]
 fn focus_target(target: &WindowTarget) -> bool {
+    let deadline = Instant::now() + FOCUS_TIMEOUT;
     let hwnd = HWND(target.hwnd as *mut _);
     // SAFETY: 目标来自跟踪器；调用间仍可能关闭，后续存活与前台检查会拒绝发送按键。
     unsafe {
         if IsIconic(hwnd).as_bool() {
-            let _ = ShowWindow(hwnd, SW_RESTORE);
+            // 同步 ShowWindow 可能等待目标窗口线程；这里只排队，实际还原由下面的轮询确认。
+            let _ = ShowWindowAsync(hwnd, SW_RESTORE);
         }
         let _ = SetForegroundWindow(hwnd);
     }
-    let deadline = Instant::now() + FOCUS_TIMEOUT;
     loop {
-        if !target.is_alive() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() || !target.is_alive() {
             return false;
         }
         // SAFETY: 仅比较前台窗口标识，不取得窗口所有权。
-        if unsafe { GetForegroundWindow() } == hwnd {
+        if unsafe { GetForegroundWindow() == hwnd && !IsIconic(hwnd).as_bool() } {
             return true;
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return false;
         }
         thread::sleep(FOCUS_POLL_INTERVAL.min(remaining));
     }
