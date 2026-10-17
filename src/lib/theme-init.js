@@ -1,12 +1,17 @@
-/** WebView 文档创建脚本；缓存仅用于首帧，快照仍是设置真源；占位符只由 Rust 的 Theme 枚举替换。 */
+/** WebView 文档创建脚本；仅使用本进程的首帧缓存，快照仍是真源；Rust 注入固定主题及纯数字会话。 */
 (() => {
   try {
+    const session = "__PROMPT_DOCK_SESSION_ID__";
+    globalThis.__PROMPT_DOCK_SESSION__ = session;
     let theme = "__PROMPT_DOCK_STARTUP_THEME__";
     try {
-      const cached = localStorage.getItem("prompt-dock.theme");
-      if (cached === "light" || cached === "dark" || cached === "system") theme = cached;
+      const cached = JSON.parse(localStorage.getItem("prompt-dock.theme") || "null");
+      if (cached && cached.session === session
+          && (cached.theme === "light" || cached.theme === "dark" || cached.theme === "system")) {
+        theme = cached.theme;
+      }
     } catch {
-      // 存储被禁用时仍可使用启动设置，不阻止页面加载。
+      // 旧格式、损坏 JSON 或存储被禁用时使用启动设置，不阻止页面加载。
     }
     if (theme === "system") return;
 

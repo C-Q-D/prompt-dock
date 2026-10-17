@@ -7,9 +7,10 @@ import script from "./theme-init.js?raw";
 
 let originalRoot: HTMLElement;
 
-/** startup 是固定枚举值；替换与 Rust 相同的占位符后执行真实注入脚本。 */
+/** startup 是固定枚举值；使用固定数字会话替换 Rust 同名占位符，执行真实脚本。 */
 function runScript(startup: Theme): void {
-  new Function(script.replace("__PROMPT_DOCK_STARTUP_THEME__", startup))();
+  new Function(script.replace("__PROMPT_DOCK_STARTUP_THEME__", startup)
+    .replace("__PROMPT_DOCK_SESSION_ID__", "12345678901234567890"))();
 }
 
 beforeEach(() => {
@@ -19,6 +20,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  Reflect.deleteProperty(globalThis, "__PROMPT_DOCK_SESSION__");
   document.replaceChildren(originalRoot);
   delete originalRoot.dataset.theme;
   localStorage.clear();
@@ -43,15 +46,28 @@ describe("文档创建主题脚本", () => {
     ["light", "dark", "dark"],
     ["dark", "system", undefined],
   ] as const)("启动值 %s、缓存 %s 时使用 %s", (startup, cached, expected) => {
-    localStorage.setItem("prompt-dock.theme", cached);
+    localStorage.setItem("prompt-dock.theme", JSON.stringify({ session: "12345678901234567890", theme: cached }));
     runScript(startup);
     expect(document.documentElement.dataset.theme).toBe(expected);
   });
 
-  it("非法缓存回落到启动值", () => {
-    localStorage.setItem("prompt-dock.theme", "sepia");
+  it.each([
+    "light",
+    '{"session":"987654321","theme":"light"}',
+    '{"theme":"light"}',
+    '{"session":12345678901234567890,"theme":"light"}',
+    '{"session":"12345678901234567890","theme":"sepia"}',
+    "null",
+    "{invalid",
+  ])("旧会话或非法缓存 %s 回落到启动值", (cached) => {
+    localStorage.setItem("prompt-dock.theme", cached);
     runScript("dark");
     expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+
+  it("把数字会话字符串暴露给前端且不丢失精度", () => {
+    runScript("system");
+    expect(Reflect.get(globalThis, "__PROMPT_DOCK_SESSION__")).toBe("12345678901234567890");
   });
 
   it("读取缓存抛错时仍使用启动值", () => {
@@ -67,7 +83,12 @@ describe("文档创建主题脚本", () => {
 
   it("观察器创建失败不向页面抛错", () => {
     document.removeChild(originalRoot);
-    vi.stubGlobal("MutationObserver", class { constructor() { throw new Error("unavailable"); } });
+    /** 模拟观察器不可用，验证首帧脚本的错误隔离。 */
+    class UnavailableObserver {
+      /** 构造时抛出固定错误，不创建观察资源。 */
+      constructor() { throw new Error("unavailable"); }
+    }
+    vi.stubGlobal("MutationObserver", UnavailableObserver);
     try {
       expect(() => runScript("dark")).not.toThrow();
     } finally {

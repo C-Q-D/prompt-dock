@@ -16,10 +16,12 @@ export function applyRootTheme(root: Pick<HTMLElement, "dataset">, ready: boolea
   if (ready) root.dataset.theme = theme;
 }
 
-/** theme 必须来自已确认快照或保存回执；缓存供重载首帧使用，存储不可用时忽略且不重试。 */
+/** theme 来自已确认快照或回执；缓存绑定当前进程，无标识的预览使用 null；存储失败忽略且不重试。 */
 export function cacheConfirmedTheme(theme: Theme): void {
   try {
-    localStorage.setItem("prompt-dock.theme", theme);
+    const injectedSession = Reflect.get(globalThis, "__PROMPT_DOCK_SESSION__");
+    const session = typeof injectedSession === "string" && /^\d+$/.test(injectedSession) ? injectedSession : null;
+    localStorage.setItem("prompt-dock.theme", JSON.stringify({ session, theme }));
   } catch {
     // 缓存是可丢失的显示优化，不能把已成功的后端保存变为失败。
   }

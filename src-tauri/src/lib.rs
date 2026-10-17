@@ -36,6 +36,11 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            // PID 与本次启动时间共同区分进程；保留为纯数字字符串，避免 JavaScript 数值精度损失。
+            let started_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|error| format!("io:startup session time: {error}"))?;
+            let session = format!("{}{}", std::process::id(), started_at.as_nanos());
             let directory = app
                 .path()
                 .app_data_dir()
@@ -52,14 +57,15 @@ pub fn run() {
                 .find(|config| config.label == "main")
                 .ok_or("io:main window configuration unavailable")?;
             let builder = WebviewWindowBuilder::from_config(app, config)?;
-            // 每次导航优先采用最近确认的缓存；占位符只替换为枚举固定值，不注入任意文本。
+            // 只接受当前进程确认的缓存；占位符仅替换为枚举固定值与纯数字会话标识。
             let startup_theme = match theme {
                 Theme::Light => "light",
                 Theme::Dark => "dark",
                 Theme::System => "system",
             };
             let script = include_str!("../../src/lib/theme-init.js")
-                .replace("__PROMPT_DOCK_STARTUP_THEME__", startup_theme);
+                .replace("__PROMPT_DOCK_STARTUP_THEME__", startup_theme)
+                .replace("__PROMPT_DOCK_SESSION_ID__", &session);
             let builder = builder.initialization_script(script);
             // 原生底色仍取本次启动设置；重载后的主题由注入脚本和前端快照决定。
             let builder = match theme {
