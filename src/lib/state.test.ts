@@ -176,6 +176,18 @@ describe("横幅和目标", () => {
   });
 });
 
+describe("浏览器场景尺寸", () => {
+  it("min 初始化保留 280×320；桌面无预览时不限制宿主尺寸", async () => {
+    const preview = setup("min");
+    await preview.dock.initialize();
+    expect(get(preview.dock).previewSize).toEqual({ width: 280, height: 320 });
+    const desktop = createDockState({ ...preview.boundary, getPreviewState: () => null });
+    sessions.push(desktop);
+    await desktop.initialize();
+    expect(get(desktop).previewSize).toBeNull();
+  });
+});
+
 describe("状态栏", () => {
   it.each([
     [true, "Claude", { lead: "粘贴到：", target: "Claude" }],

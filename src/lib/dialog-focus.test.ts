@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
 /** 使用实际 DOM action 验证焦点和键盘；不启动浏览器。 */
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dialogFocus } from "./dialog-focus";
 

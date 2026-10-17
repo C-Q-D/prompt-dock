@@ -11,6 +11,8 @@ export type Toast = { message: string; remainingMs: number; startedAt: number | 
 export type Dialog = { kind: "add" | "edit"; prompt: Prompt | null; text: string; error: string | null; busy: boolean };
 /** 快照、排序与撤销回执可替换完整列表；计次和编辑保持位置，新增追加末尾。 */
 export type DockState = {
+  /** 仅浏览器画板使用像素尺寸；null 表示跟随桌面宿主。 */
+  previewSize: { width: number; height: number } | null;
   prompts: Prompt[];
   settings: Settings;
   targetTitle: string | null;
@@ -42,6 +44,7 @@ const warningMessages: Record<WarningCode, Banner> = {
 /** 用快照生成初态；preview 仅用于浏览器，nowMs 与会话时钟采用相同单位。 */
 export function stateFromSnapshot(snapshot: Snapshot, preview: PreviewState | null, nowMs: number): DockState {
   return {
+    previewSize: preview ? { width: preview.width, height: preview.height } : null,
     prompts: snapshot.prompts, settings: snapshot.settings, targetTitle: snapshot.targetTitle,
     banner: [...snapshot.warnings.map((code) => warningMessages[code]), ...(preview?.banner ? [preview.banner] : [])],
     toast: preview?.toast ? {
@@ -120,6 +123,7 @@ function shouldSort(state: DockState, onlyIfDirty: boolean): boolean {
 /** 创建窗口会话；destroy 取消资源，已在途命令不重试且销毁后不再更新状态。 */
 export function createDockState(backend: DockApi = api) {
   const store = writable<DockState>({
+    previewSize: null,
     prompts: [], settings: { autoPaste: true, alwaysOnTop: false }, targetTitle: null,
     banner: [], toast: null, dialog: null, dirty: false, ready: false,
   });

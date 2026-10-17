@@ -66,7 +66,10 @@
   }
 </script>
 
-<main class="win" aria-label="常用提示词" onmouseleave={() => void dock.sortPrompts(true)}>
+<main class="win" aria-label="常用提示词"
+  style:width={$dock.previewSize ? `${$dock.previewSize.width}px` : undefined}
+  style:height={$dock.previewSize ? `${$dock.previewSize.height}px` : undefined}
+  onmouseleave={() => void dock.sortPrompts(true)}>
   <div class="window-content" inert={!!$dock.dialog}>
   <header class="tbar" data-tauri-drag-region>
     <span class="tbar-t" data-tauri-drag-region>常用提示词</span>
