@@ -40,7 +40,7 @@ pub struct WindowTarget {
 
 impl WindowTarget {
     /// 检查句柄和所属进程仍然匹配，避免已销毁句柄被其他进程复用后成为目标。
-    fn is_alive(&self) -> bool {
+    pub(crate) fn is_alive(&self) -> bool {
         let hwnd = HWND(self.hwnd as *mut _);
         let mut pid = 0;
         // SAFETY: 只查询不拥有的窗口标识；Win32 允许查询失效 HWND，并返回失败。
@@ -326,6 +326,11 @@ fn read_target(hwnd: HWND) -> Option<WindowTarget> {
     // SAFETY: 输出缓冲区和 PID 指针有效；这些查询允许窗口在调用间被外部进程销毁。
     let (class_length, title) = unsafe {
         if !IsWindow(Some(hwnd)).as_bool() || GetWindowThreadProcessId(hwnd, Some(&mut pid)) == 0 {
+            return None;
+        }
+        // 本进程标题查询会同步发送消息；必须在读类名和标题前排除，避免 UI 线程在 stop
+        // 等待钩子退出时，钩子又通过 GetWindowTextLengthW/GetWindowTextW 等待 UI 线程。
+        if pid == std::process::id() {
             return None;
         }
         let class_length = usize::try_from(GetClassNameW(hwnd, &mut class_name)).ok()?;

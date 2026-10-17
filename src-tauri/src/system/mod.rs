@@ -2,3 +2,4 @@
 
 #[cfg(windows)]
 pub mod foreground;
+pub mod paste;

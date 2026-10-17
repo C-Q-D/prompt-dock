@@ -1,6 +1,9 @@
-//! 将前端命令接到 Store、剪贴板和主窗口；本阶段只复制，不跟踪或切换目标窗口。
+//! 将前端命令接到 Store、剪贴板、系统粘贴和主窗口，保持保存后复制的执行顺序。
 
 use crate::store::{DeletedPrompt, Prompt, Settings, Store, WarningCode};
+use crate::system::paste::PasteKind as UseKind;
+#[cfg(windows)]
+use crate::system::{foreground::ForegroundTracker, paste::paste_to_target};
 use serde::Serialize;
 use std::{
     path::PathBuf,
@@ -40,14 +43,7 @@ pub(crate) struct Snapshot {
     pub(crate) warnings: Vec<WarningCode>,
 }
 
-/// 本阶段的成功结果只有 copied；系统粘贴结果由 T2 扩充。
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum UseKind {
-    Copied,
-}
-
-/// 使用提示词后的回执；prompt 含已保存次数，T1 的目标标题恒为 null。
+/// 使用提示词后的回执；prompt 含已保存次数，系统粘贴分类附带目标标题。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct UseResult {
@@ -143,7 +139,7 @@ pub(crate) fn sort_by_count(state: State<'_, AppState>) -> Result<Vec<Prompt>, S
     state.lock()?.sort_by_count()
 }
 
-/// 对 id 计次并保存，再通过 app 插件写剪贴板；返回 copied，目标标题为 null。
+/// 对 id 计次并保存，再通过 app 插件写剪贴板，按自动粘贴设置和最近目标执行系统粘贴。
 /// 未知 id 返回 not_found，保存或剪贴板失败返回 io:；剪贴板失败不回滚已保存次数。
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) fn use_prompt(
@@ -152,11 +148,30 @@ pub(crate) fn use_prompt(
     state: State<'_, AppState>,
 ) -> Result<UseResult, String> {
     let mut store = state.lock()?;
-    copy_prompt(&mut store, &id, |text| {
+    let result = copy_prompt(&mut store, &id, |text| {
         app.clipboard()
             .write_text(text)
             .map_err(|error| format!("io:{error}"))
-    })
+    })?;
+    #[cfg(windows)]
+    let auto_paste = store.settings().auto_paste;
+    drop(store);
+    #[cfg(windows)]
+    {
+        let target = if auto_paste {
+            app.state::<ForegroundTracker>().current_target()?
+        } else {
+            None
+        };
+        let outcome = paste_to_target(auto_paste, target)?;
+        Ok(UseResult {
+            kind: outcome.kind,
+            target_title: outcome.target_title,
+            prompt: result.prompt,
+        })
+    }
+    #[cfg(not(windows))]
+    Ok(result)
 }
 
 /// 保存完整 settings，再把 alwaysOnTop 应用到 app 的主窗口，返回保存值。
