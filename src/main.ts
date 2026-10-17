@@ -1,4 +1,4 @@
-/** WebView 挂载入口；业务状态与后端调用由后续任务接入。 */
+/** WebView 挂载入口；加载主题和基础样式，业务状态由主窗口会话持有。 */
 import { mount } from "svelte";
 import App from "./App.svelte";
 import "./lib/tokens.css";

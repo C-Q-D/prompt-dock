@@ -238,8 +238,15 @@
   opacity: 0.5;
   cursor: default
 }
-.ib:active:not(:disabled),.btn:active:not(:disabled) {
-  filter: brightness(0.9)
+.ib:active:not(:disabled) {
+  background: var(--fill-hover);
+  color: var(--ink)
+}
+.btn.pri:active:not(:disabled) {
+  background: var(--ink-hover)
+}
+.btn.sec:active:not(:disabled),.btn.weak:active:not(:disabled) {
+  background: var(--fill-hover)
 }
 .toast {
   animation: toast-in 200ms var(--ease)
